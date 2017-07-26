@@ -11,6 +11,7 @@
 #define g 9.807 			//Standard Earth ASL gravitational acceleration
 #define h 0.1  	 			//Second-order algorithm timestep magnitude
 #define PI 3.14159265359	//Pi (duh)
+#define PI-2 
 
 class Stage {
 public:
@@ -39,6 +40,11 @@ double get_TWR(std::vector<Stage> stages, double time) {
 std::tuple<double, double, double> normalize(std::tuple<double, double, double> vec) {
 	double mag = sqrt(pow(std::get<0>(vec), 2) + pow(std::get<1>(vec), 2) + pow(std::get<2>(vec), 2));
 	return std::make_tuple(std::get<0>(vec)/mag, std::get<1>(vec)/mag, std::get<2>(vec)/mag);
+}
+
+//TODO: Modify to use config
+void stage(krpc::Services::SpaceCenter::Control cont) {
+	cont.activate_next_stage();
 }
 
 int main() {	
@@ -104,11 +110,13 @@ int main() {
 	vessel.control().set_throttle(1);
 	
 	auto ap = vessel.auto_pilot();
+	auto cont = vessel.control();
 	ap.set_reference_frame(vessel.orbital_reference_frame());
 	ap.engage();
 	
 	auto ref_frame = vessel.orbit().body().reference_frame();
 	auto velocity = vessel.flight(ref_frame).speed_stream();
+	auto gees = vessel.flight(ref_frame).g_force_stream();
 	
 	ap.set_target_direction(std::make_tuple(0, 1, 0));
 	
@@ -116,7 +124,8 @@ int main() {
 	//Actually execute gravity turn
 	for(unsigned i = 1; i < v.size(); i++) {
 		while(velocity() < v[i]);
-		ap.set_target_direction(normalize(std::make_tuple()));
+		ap.set_target_direction(normalize(std::make_tuple(PI/2.0 - beta[i], beta[i], 0)));
+		if(gees() < 0.1) stage(cont);
 	}
 	
     return 0;
