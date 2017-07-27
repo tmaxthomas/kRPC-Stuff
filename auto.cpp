@@ -10,8 +10,7 @@
 //Some useful constants
 #define g 9.807 			//Standard Earth ASL gravitational acceleration
 #define h 0.1  	 			//Second-order algorithm timestep magnitude
-#define PI 3.14159265359	//Pi (duh)
-#define PI-2 
+#define PI 3.14159265359	//Pi (duh) 
 
 class Stage {
 public:
@@ -23,7 +22,7 @@ public:
 double get_TWR(std::vector<Stage> stages, double time) {
 	int stage_num = -1;
 	double acc_time = 0; //Holds useful time numbers
-	while(acc_time < time) {
+	while(acc_time <= time) {
 		stage_num++;
 		acc_time += stages[stage_num].burn_time;
 	}
@@ -40,11 +39,6 @@ double get_TWR(std::vector<Stage> stages, double time) {
 std::tuple<double, double, double> normalize(std::tuple<double, double, double> vec) {
 	double mag = sqrt(pow(std::get<0>(vec), 2) + pow(std::get<1>(vec), 2) + pow(std::get<2>(vec), 2));
 	return std::make_tuple(std::get<0>(vec)/mag, std::get<1>(vec)/mag, std::get<2>(vec)/mag);
-}
-
-//TODO: Modify to use config
-void stage(krpc::Services::SpaceCenter::Control cont) {
-	cont.activate_next_stage();
 }
 
 int main() {	
@@ -94,14 +88,20 @@ int main() {
 	v.resize(4);
 	beta.resize(4);
 	
-	for(double i = 3; i < 2000; i++) {
+	for(double i = 3; i < 20; i++) {
 		double t = i * h;
 		double b = beta[i-1] + (beta[i] - beta[i-1])*2;
 		//Yay, magic coefficients
 		v.push_back((12.0/25.0) * h * g * (get_TWR(stages, t + h) - cos(b)) + (48.0/25.0) * v[i] - (36.0/25.0) * v[i-1] + (16.0/25.0) * v[i-2] - (3.0/25.0) * v[i-3]);
-		beta.push_back((12.0/25.0) * ((h * g) / v[i+1]) * sin(b) + (48.0/25.0) * v[i] - (36.0/25.0) * v[i-1] + (16.0/25.0) * v[i-2] - (3.0/25.0) * v[i-3]);
+		beta.push_back((12.0/25.0) * ((h * g) / v[i+1]) * sin(b) + (48.0/25.0) * beta[i] - (36.0/25.0) * beta[i-1] + (16.0/25.0) * beta[i-2] - (3.0/25.0) * beta[i-3]);
 	}
 	
+	std::cout << "Printing first 100 gravity turn entries\n\n";
+	for(int i = 0; i < 100; i++) {
+		std::cout << "v: " << v[i] << ", beta: " << beta[i] << ", projected TWR:" << get_TWR(stages, .1*i) << "\n";
+	}
+	
+	/*
 	auto ut = space_center.ut_stream();
 	
 	//Prep for launch
@@ -114,19 +114,35 @@ int main() {
 	ap.set_reference_frame(vessel.orbital_reference_frame());
 	ap.engage();
 	
-	auto ref_frame = vessel.orbit().body().reference_frame();
+	auto ref_frame = vessel.surface_reference_frame();
 	auto velocity = vessel.flight(ref_frame).speed_stream();
 	auto gees = vessel.flight(ref_frame).g_force_stream();
 	
 	ap.set_target_direction(std::make_tuple(0, 1, 0));
 	
+	std::this_thread::sleep_for(std::chrono::seconds(1));
+	std::cout << "Main sequence start\n";
+	cont.activate_next_stage();
+	std::cout << "3...\n";
+	std::this_thread::sleep_for(std::chrono::seconds(1));
+	std::cout << "2...\n";
+	std::this_thread::sleep_for(std::chrono::milliseconds(500));
+	std::cout << "All engines running\n";
+	std::this_thread::sleep_for(std::chrono::milliseconds(500));
+	std::cout << "1...\n";
+	std::this_thread::sleep_for(std::chrono::seconds(1));
+	cont.activate_next_stage();
+	std::cout << "Liftoff!\n\n";
 	
+	std::cout << "Executing gravity turn\n";
 	//Actually execute gravity turn
 	for(unsigned i = 1; i < v.size(); i++) {
 		while(velocity() < v[i]);
-		ap.set_target_direction(normalize(std::make_tuple(PI/2.0 - beta[i], beta[i], 0)));
-		if(gees() < 0.1) stage(cont);
+		std::tuple<double, double, double> direction = normalize(std::make_tuple(cos(beta[i]), 0, sin(beta[i])));
+		std::cout << std::get<0>(direction) << " " << std::get<1>(direction) << " " << std::get<2>(direction) << "\n";
+		ap.set_target_direction(direction);
+		if(gees() < 0.1) cont.activate_next_stage();
 	}
-	
+	*/
     return 0;
 }
