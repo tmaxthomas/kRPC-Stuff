@@ -18,6 +18,7 @@ public:
 	double start_TWR;
 	double end_TWR;
 	double burn_time;
+	bool ullage;
 };
 
 double get_TWR(std::vector<Stage> stages, double time) {
@@ -67,6 +68,9 @@ int main() {
 				break;
 			case 2:
 				stages.back().burn_time = temp;
+				break;
+			case 3:
+				stages.back().ullage = temp;
 				counter = 0;
 		}
 	}
@@ -144,7 +148,7 @@ int main() {
 	cont.activate_next_stage();
 	std::cout << "Liftoff!\n\n";
 	
-	bool booster_sep = false, fairing_sep = false;
+	bool fairing_sep = false;
 	double tgt_pitch = 0;
 	
 	std::cout << "Executing gravity turn...\n";
@@ -153,11 +157,9 @@ int main() {
 		while(velocity() < v[i]);
 		std::tuple<double, double, double> direction = std::make_tuple(cos(beta[i]), tgt_pitch, sin(beta[i]));
 		ap.set_target_direction(direction);
-		if(!booster_sep && booster_eng.thrust() == 0) {
+		if(active_eng.thrust() == 0) {
 			std::this_thread::sleep_for(std::chrono::milliseconds(500));
 			cont.activate_next_stage();
-			cont.set_rcs(true);
-			booster_sep = true;
 		}
 		if(altitude() > 100000){
 			if(!fairing_sep){
