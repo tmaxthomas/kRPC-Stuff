@@ -4,6 +4,7 @@
 #include <chrono>
 #include <thread>
 #include <tuple>
+#include <iomanip>
 #include <cmath>
 #include <krpc.hpp>
 #include <krpc/services/space_center.hpp>
@@ -32,7 +33,7 @@ double get_TWR(std::vector<Stage> stages, double time) {
 	double m_end = 1.0 / stage.end_TWR; //Fake-unit start/end mass numbers
 	double m_start = 1.0 / stage.start_TWR;
 	double m_inc = (m_start - m_end) / stage.burn_time;
-	return m_start - (m_inc * acc_time);
+	return 1.0 / (m_start - (m_inc * acc_time));
 }
 
 //Vector normalizer
@@ -41,12 +42,12 @@ std::tuple<double, double, double> normalize(std::tuple<double, double, double> 
 	return std::make_tuple(std::get<0>(vec)/mag, std::get<1>(vec)/mag, std::get<2>(vec)/mag);
 }
 
-int main() {	
+int main() {
     krpc::Client conn = krpc::connect();
 	krpc::services::SpaceCenter space_center(&conn);
 	auto vessel = space_center.active_vessel();
 	std::vector<double> v = {0};
-	std::vector<double> beta = {0};
+	std::vector<double> beta = {0.00000000415};  //This number is magic. Don't change it.
 	std::vector<Stage> stages;
 	
 	std::ifstream istr("config.txt");
@@ -72,23 +73,23 @@ int main() {
 	
 	std::cout << "Computing gravity turn...\n";
 	
-	//Use first-order algorithm at 10x precision to get first 4 terms
-	for(double i = 0; i < 30; i++) {
-		v.push_back(.01*g*(get_TWR(stages, .01*(i+1)) - cos(beta[i])) + v[i]);
-		int v_beta = .01*g*sin(beta[i]) + beta[i]*v[i+1];
+	//Use first-order algorithm at 100x precision to get first 4 terms
+	for(double i = 0; i < 300; i++) {
+		v.push_back(.001*g*(get_TWR(stages, .001*(i+1)) - cos(beta[i])) + v[i]);
+		double v_beta = .001*g*sin(beta[i]) + beta[i]*v[i+1];
 		beta.push_back(v_beta / v[i+1]);
 	}
 	
 	//Move first 4 terms into place & truncate vector
 	for(int i = 1; i < 4; i++) {
-		v[i] = v[i*10];
-		beta[i] = beta[i*10];
+		v[i] = v[i*100];
+		beta[i] = beta[i*100];
 	}
 	
 	v.resize(4);
 	beta.resize(4);
-	
-	for(double i = 3; i < 20; i++) {
+	//Compute 500 seconds of gravity turn
+	for(double i = 3; i < 5000; i++) {
 		double t = i * h;
 		double b = beta[i-1] + (beta[i] - beta[i-1])*2;
 		//Yay, magic coefficients
@@ -96,14 +97,10 @@ int main() {
 		beta.push_back((12.0/25.0) * ((h * g) / v[i+1]) * sin(b) + (48.0/25.0) * beta[i] - (36.0/25.0) * beta[i-1] + (16.0/25.0) * beta[i-2] - (3.0/25.0) * beta[i-3]);
 	}
 	
-	std::cout << "Printing first 100 gravity turn entries\n\n";
-	for(int i = 0; i < 100; i++) {
-		std::cout << "v: " << v[i] << ", beta: " << beta[i] << ", projected TWR:" << get_TWR(stages, .1*i) << "\n";
-	}
+	std::cout << "Done.\n\n";
 	
-	/*
+	
 	auto ut = space_center.ut_stream();
-	
 	//Prep for launch
 	vessel.control().set_sas(false);
 	vessel.control().set_rcs(false);
@@ -111,14 +108,27 @@ int main() {
 	
 	auto ap = vessel.auto_pilot();
 	auto cont = vessel.control();
-	ap.set_reference_frame(vessel.orbital_reference_frame());
 	ap.engage();
 	
 	auto ref_frame = vessel.surface_reference_frame();
-	auto velocity = vessel.flight(ref_frame).speed_stream();
-	auto gees = vessel.flight(ref_frame).g_force_stream();
+	auto velocity_frame = krpc::services::SpaceCenter::ReferenceFrame::create_hybrid(conn, 
+		vessel.orbit().body().non_rotating_reference_frame(),
+		vessel.surface_reference_frame());
+	auto velocity = vessel.flight(vessel.orbit().body().reference_frame()).speed_stream();
+	auto altitude = vessel.flight().mean_altitude_stream();
+	auto periapsis = vessel.orbit().periapsis_altitude_stream();
+	auto gees = vessel.flight(vessel.orbit().body().reference_frame()).g_force_stream();
+	krpc::services::SpaceCenter::Engine booster_eng;
+	auto engines = vessel.parts().engines();
+	for(auto engine : engines) {
+		if(engine.part().title() == "LR89 Series") {
+			booster_eng = engine;
+			break;
+		}
+	}
 	
-	ap.set_target_direction(std::make_tuple(0, 1, 0));
+	ap.set_reference_frame(ref_frame);
+	ap.set_target_direction(std::make_tuple(1, 0, 0));
 	
 	std::this_thread::sleep_for(std::chrono::seconds(1));
 	std::cout << "Main sequence start\n";
@@ -134,15 +144,37 @@ int main() {
 	cont.activate_next_stage();
 	std::cout << "Liftoff!\n\n";
 	
-	std::cout << "Executing gravity turn\n";
+	bool booster_sep = false, fairing_sep = false;
+	double tgt_pitch = 0;
+	
+	std::cout << "Executing gravity turn...\n";
 	//Actually execute gravity turn
 	for(unsigned i = 1; i < v.size(); i++) {
 		while(velocity() < v[i]);
-		std::tuple<double, double, double> direction = normalize(std::make_tuple(cos(beta[i]), 0, sin(beta[i])));
-		std::cout << std::get<0>(direction) << " " << std::get<1>(direction) << " " << std::get<2>(direction) << "\n";
+		std::tuple<double, double, double> direction = std::make_tuple(cos(beta[i]), tgt_pitch, sin(beta[i]));
 		ap.set_target_direction(direction);
-		if(gees() < 0.1) cont.activate_next_stage();
+		if(!booster_sep && booster_eng.thrust() == 0) {
+			std::this_thread::sleep_for(std::chrono::milliseconds(500));
+			cont.activate_next_stage();
+			cont.set_rcs(true);
+			booster_sep = true;
+		}
+		if(altitude() > 100000){
+			if(!fairing_sep){
+				cont.activate_next_stage();
+			fairing_sep = true;
+			}
+			tgt_pitch = std::get<1>(normalize(vessel.flight(velocity_frame).velocity()));
+		}
+		if(periapsis() > 170000) {
+			std::cout << "Done.\n\n";
+			cont.set_throttle(0);
+			std::this_thread::sleep_for(std::chrono::seconds(1));
+			cont.activate_next_stage();
+			break;
+		}
 	}
-	*/
+	
+	std::cout << "Orbit achieved";
     return 0;
 }
