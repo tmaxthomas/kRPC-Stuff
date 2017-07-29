@@ -122,14 +122,8 @@ int main() {
 	auto altitude = vessel.flight().mean_altitude_stream();
 	auto periapsis = vessel.orbit().periapsis_altitude_stream();
 	auto gees = vessel.flight(vessel.orbit().body().reference_frame()).g_force_stream();
-	krpc::services::SpaceCenter::Engine booster_eng;
+	krpc::services::SpaceCenter::Engine active_eng;
 	auto engines = vessel.parts().engines();
-	for(auto engine : engines) {
-		if(engine.part().title() == "LR89 Series") {
-			booster_eng = engine;
-			break;
-		}
-	}
 	
 	ap.set_reference_frame(ref_frame);
 	ap.set_target_direction(std::make_tuple(1, 0, 0));
@@ -137,6 +131,9 @@ int main() {
 	std::this_thread::sleep_for(std::chrono::seconds(1));
 	std::cout << "Main sequence start\n";
 	cont.activate_next_stage();
+	for(auto engine : engines)
+		if(engine.active() && engine.has_fuel())
+			active_eng = engine;
 	std::cout << "3...\n";
 	std::this_thread::sleep_for(std::chrono::seconds(1));
 	std::cout << "2...\n";
@@ -151,7 +148,7 @@ int main() {
 	bool fairing_sep = false;
 	double tgt_pitch = 0;
 	
-	std::cout << "Executing gravity turn...\n";
+	std::cout << " Executing gravity turn...\n";
 	//Actually execute gravity turn
 	for(unsigned i = 1; i < v.size(); i++) {
 		while(velocity() < v[i]);
@@ -160,11 +157,14 @@ int main() {
 		if(active_eng.thrust() == 0) {
 			std::this_thread::sleep_for(std::chrono::milliseconds(500));
 			cont.activate_next_stage();
+			for(auto engine : engines) //Find the next stage's engine
+				if(engine.active() && engine.has_fuel())
+					active_eng = engine;
 		}
 		if(altitude() > 100000){
 			if(!fairing_sep){
 				cont.activate_next_stage();
-			fairing_sep = true;
+				fairing_sep = true;
 			}
 			tgt_pitch = std::get<1>(normalize(vessel.flight(velocity_frame).velocity()));
 		}
