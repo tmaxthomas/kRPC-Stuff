@@ -43,15 +43,17 @@ std::tuple<double, double, double> normalize(std::tuple<double, double, double> 
 	return std::make_tuple(std::get<0>(vec)/mag, std::get<1>(vec)/mag, std::get<2>(vec)/mag);
 }
 
-int main() {
+int main(int argc, char* argv[]) {
     krpc::Client conn = krpc::connect();
 	krpc::services::SpaceCenter space_center(&conn);
 	auto vessel = space_center.active_vessel();
 	std::vector<double> v = {0};
-	std::vector<double> beta = {0.00000000415};  //This number is magic. Don't change it.
+	std::vector<double> beta = {0};
 	std::vector<Stage> stages;
+	std::ifstream istr(argv[1]);
 	
-	std::ifstream istr("config.txt");
+	istr >> beta[0];
+	
 	double temp;
 	int counter = 0;
 	while(istr >> temp) {
@@ -68,6 +70,7 @@ int main() {
 				break;
 			case 2:
 				stages.back().burn_time = temp;
+				counter++;
 				break;
 			case 3:
 				stages.back().ullage = temp;
@@ -99,6 +102,7 @@ int main() {
 		//Yay, magic coefficients
 		v.push_back((12.0/25.0) * h * g * (get_TWR(stages, t + h) - cos(b)) + (48.0/25.0) * v[i] - (36.0/25.0) * v[i-1] + (16.0/25.0) * v[i-2] - (3.0/25.0) * v[i-3]);
 		beta.push_back((12.0/25.0) * ((h * g) / v[i+1]) * sin(b) + (48.0/25.0) * beta[i] - (36.0/25.0) * beta[i-1] + (16.0/25.0) * beta[i-2] - (3.0/25.0) * beta[i-3]);
+		std::cout << v[i] << " " << beta[i] << "\n";
 	}
 	
 	std::cout << "Done.\n\n";
@@ -107,7 +111,7 @@ int main() {
 	auto ut = space_center.ut_stream();
 	//Prep for launch
 	vessel.control().set_sas(false);
-	vessel.control().set_rcs(false);
+	vessel.control().set_rcs(true);
 	vessel.control().set_throttle(1);
 	
 	auto ap = vessel.auto_pilot();
@@ -121,6 +125,7 @@ int main() {
 	auto velocity = vessel.flight(vessel.orbit().body().reference_frame()).speed_stream();
 	auto altitude = vessel.flight().mean_altitude_stream();
 	auto periapsis = vessel.orbit().periapsis_altitude_stream();
+	auto apoapsis = vessel.orbit().apoapsis_altitude_stream();
 	auto gees = vessel.flight(vessel.orbit().body().reference_frame()).g_force_stream();
 	krpc::services::SpaceCenter::Engine active_eng;
 	auto engines = vessel.parts().engines();
@@ -148,7 +153,9 @@ int main() {
 	bool fairing_sep = false;
 	double tgt_pitch = 0;
 	
-	std::cout << " Executing gravity turn...\n";
+	ap.set_target_roll(0);
+	
+	std::cout << "Executing gravity turn...\n";
 	//Actually execute gravity turn
 	for(unsigned i = 1; i < v.size(); i++) {
 		while(velocity() < v[i]);
@@ -158,8 +165,10 @@ int main() {
 			std::this_thread::sleep_for(std::chrono::milliseconds(500));
 			cont.activate_next_stage();
 			for(auto engine : engines) //Find the next stage's engine
-				if(engine.active() && engine.has_fuel())
+				if(engine.active() && engine.has_fuel()) {
 					active_eng = engine;
+					break;
+				}
 		}
 		if(altitude() > 100000){
 			if(!fairing_sep){
@@ -168,7 +177,7 @@ int main() {
 			}
 			tgt_pitch = std::get<1>(normalize(vessel.flight(velocity_frame).velocity()));
 		}
-		if(periapsis() > 170000) {
+		if(abs(apoapsis() - periapsis()) < 10000) {
 			std::cout << "Done.\n\n";
 			cont.set_throttle(0);
 			std::this_thread::sleep_for(std::chrono::seconds(1));
