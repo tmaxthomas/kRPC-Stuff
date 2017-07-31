@@ -43,6 +43,26 @@ std::tuple<double, double, double> normalize(std::tuple<double, double, double> 
 	return std::make_tuple(std::get<0>(vec)/mag, std::get<1>(vec)/mag, std::get<2>(vec)/mag);
 }
 
+void check_stages(krpc::services::SpaceCenter::Control cont, 
+				  std::vector<krpc::services::SpaceCenter::Engine> engines, 
+				  krpc::services::SpaceCenter::Engine& active_eng
+				  std::vector<Stage>::iterator& curent_stage) {
+	if(active_eng.thrust() == 0) {
+			std::this_thread::sleep_for(std::chrono::milliseconds(500));
+			cont.activate_next_stage();
+			if(current_stage->ullage) {
+				std::this_thread::sleep_for(std::chrono::milliseconds(500));
+				cont.activate_next_stage();
+			}
+			for(auto engine : engines) //Find the next stage's engine
+				if(engine.active() && engine.has_fuel()) {
+					active_eng = engine;
+					break;
+				}
+			current_stage++;
+		}
+}
+
 int main(int argc, char* argv[]) {
     krpc::Client conn = krpc::connect();
 	krpc::services::SpaceCenter space_center(&conn);
@@ -95,14 +115,15 @@ int main(int argc, char* argv[]) {
 	
 	v.resize(4);
 	beta.resize(4);
-	//Compute 500 seconds of gravity turn
+	//Compute gravity turn
+	
+	
 	for(double i = 3; i < 5000; i++) {
 		double t = i * h;
 		double b = beta[i-1] + (beta[i] - beta[i-1])*2;
 		//Yay, magic coefficients
 		v.push_back((12.0/25.0) * h * g * (get_TWR(stages, t + h) - cos(b)) + (48.0/25.0) * v[i] - (36.0/25.0) * v[i-1] + (16.0/25.0) * v[i-2] - (3.0/25.0) * v[i-3]);
 		beta.push_back((12.0/25.0) * ((h * g) / v[i+1]) * sin(b) + (48.0/25.0) * beta[i] - (36.0/25.0) * beta[i-1] + (16.0/25.0) * beta[i-2] - (3.0/25.0) * beta[i-3]);
-		std::cout << v[i] << " " << beta[i] << "\n";
 	}
 	
 	std::cout << "Done.\n\n";
@@ -153,23 +174,20 @@ int main(int argc, char* argv[]) {
 	bool fairing_sep = false;
 	double tgt_pitch = 0;
 	
+	auto stage_itr = stages.begin();
+	
 	ap.set_target_roll(0);
 	
 	std::cout << "Executing gravity turn...\n";
 	//Actually execute gravity turn
 	for(unsigned i = 1; i < v.size(); i++) {
-		while(velocity() < v[i]);
+		if(v[i] > v[i-1])
+			while(velocity() < v[i]) check_stages(cont, engines, active_eng, stage_itr);
+		else
+			while(velocity() > v[i]) check_stages(cont, engines, active_eng, stage_itr);
 		std::tuple<double, double, double> direction = std::make_tuple(cos(beta[i]), tgt_pitch, sin(beta[i]));
 		ap.set_target_direction(direction);
-		if(active_eng.thrust() == 0) {
-			std::this_thread::sleep_for(std::chrono::milliseconds(500));
-			cont.activate_next_stage();
-			for(auto engine : engines) //Find the next stage's engine
-				if(engine.active() && engine.has_fuel()) {
-					active_eng = engine;
-					break;
-				}
-		}
+		
 		if(altitude() > 100000){
 			if(!fairing_sep){
 				cont.activate_next_stage();
