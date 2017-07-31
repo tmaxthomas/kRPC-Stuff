@@ -99,6 +99,8 @@ int main(int argc, char* argv[]) {
 	}
 	
 	std::cout << "Computing gravity turn...\n";
+	//TODO: Fix all of this mess so it ain't borked
+	
 	
 	//Use first-order algorithm at 100x precision to get first 4 terms
 	for(double i = 0; i < 300; i++) {
@@ -115,9 +117,9 @@ int main(int argc, char* argv[]) {
 	
 	v.resize(4);
 	beta.resize(4);
+	
+	
 	//Compute gravity turn
-	
-	
 	for(double i = 3; i < 5000; i++) {
 		double t = i * h;
 		double b = beta[i-1] + (beta[i] - beta[i-1])*2;
