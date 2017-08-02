@@ -10,7 +10,7 @@
 #include <krpc/services/space_center.hpp>
 //Some useful constants
 #define g 9.807 			//Standard Earth ASL gravitational acceleration
-#define h 0.1  	 			//Second-order algorithm timestep magnitude
+#define h 0.01  	 		//Second-order algorithm timestep magnitude
 #define PI 3.14159265359	//Pi (duh) 
 
 class Stage {
@@ -45,8 +45,8 @@ std::tuple<double, double, double> normalize(std::tuple<double, double, double> 
 
 void check_stages(krpc::services::SpaceCenter::Control cont, 
 				  std::vector<krpc::services::SpaceCenter::Engine> engines, 
-				  krpc::services::SpaceCenter::Engine& active_eng
-				  std::vector<Stage>::iterator& curent_stage) {
+				  krpc::services::SpaceCenter::Engine& active_eng,
+				  std::vector<Stage>::iterator& current_stage) {
 	if(active_eng.thrust() == 0) {
 			std::this_thread::sleep_for(std::chrono::milliseconds(500));
 			cont.activate_next_stage();
@@ -67,15 +67,18 @@ int main(int argc, char* argv[]) {
     krpc::Client conn = krpc::connect();
 	krpc::services::SpaceCenter space_center(&conn);
 	auto vessel = space_center.active_vessel();
-	std::vector<double> v = {0};
-	std::vector<double> beta = {0};
+	std::vector<double> v; 					//Proper storage of velocity values
+	std::vector<double> beta;				//Proper storage of beta (angle off of vertical)
+	std::vector<double> v_temp = {0};		//Temporary v storage for use in second-order approximation
+	std::vector<double> beta_temp = {0};	//Ditto for beta
 	std::vector<Stage> stages;
 	std::ifstream istr(argv[1]);
 	
-	istr >> beta[0];
+	istr >> beta_temp[0];
 	
 	double temp;
 	int counter = 0;
+	//Use a switch to parse the file (the idea is to insert error-checking for an incomplete file later)
 	while(istr >> temp) {
 		switch(counter) {
 			case 0:
@@ -99,34 +102,59 @@ int main(int argc, char* argv[]) {
 	}
 	
 	std::cout << "Computing gravity turn...\n";
+	
 	//TODO: Fix all of this mess so it ain't borked
-	
-	
-	//Use first-order algorithm at 100x precision to get first 4 terms
-	for(double i = 0; i < 300; i++) {
-		v.push_back(.001*g*(get_TWR(stages, .001*(i+1)) - cos(beta[i])) + v[i]);
-		double v_beta = .001*g*sin(beta[i]) + beta[i]*v[i+1];
-		beta.push_back(v_beta / v[i+1]);
+	double t = 0, acc_t = 0;
+	int i = 0;
+	//Actually account for staging properly (flarping non-smoothness of TWR...)
+	for(std::vector<Stage>::iterator stage = stages.begin(); stage != stages.end(); stage++) {
+		//Temporaryer vectors used for first-order approximation
+		std::vector<double> v_fo; v_fo.push_back(v_temp.back());
+		std::vector<double> beta_fo; beta_fo.push_back(beta_temp.back());
+		acc_t += stage->burn_time;
+		//Use first-order algorithm at 100x precision to get first 4 terms
+		for(int j = 0; j < 30; j++) {
+			v_fo.push_back(.001*g*(get_TWR(stages, t + .001) - cos(beta_fo[i])) + v_fo[i]);
+			double v_beta = .001*g*sin(beta_fo[i]) + beta_fo[i]*v_fo[i+1];
+			beta_fo.push_back(v_beta / v_fo[i+1]);
+			t += .001;
+		}
+		
+		int inc = i + 4;
+		//Move first 4 terms into place (don't need to move the first since it's already in place)
+		for(i++; i < inc; i++) {
+		v_temp.push_back(v_fo[((inc - i) % 4) * 10]);
+			beta_temp.push_back(beta_fo[((inc - i) % 4) * 10]);
+		}
+		
+		
+		//Compute gravity turn
+		for(; i < stage->burn_time / h; i++) {
+			double b = beta_temp[i-1] + (beta_temp[i] - beta_temp[i-1])*2;
+			//Yay, magic coefficients
+			v_temp.push_back((12.0/25.0) * h * g * (get_TWR(stages, t + h) - cos(b)) + 
+							 (48.0/25.0) * v_temp[i] - (36.0/25.0) * v_temp[i-1] + 
+							 (16.0/25.0) * v_temp[i-2] - (3.0/25.0) * v_temp[i-3]);
+			beta_temp.push_back((12.0/25.0) * ((h * g) / v_temp[i+1]) * sin(b) + 
+								(48.0/25.0) * beta_temp[i] - (36.0/25.0) * beta_temp[i-1] + 
+								(16.0/25.0) * beta_temp[i-2] - (3.0/25.0) * beta_temp[i-3]);
+			t += h;
+		}
+		//Implement this later
+		if(stage != --stages.end()) { //Woo, prefix-decrement
+			
+		}
 	}
 	
-	//Move first 4 terms into place & truncate vector
-	for(int i = 1; i < 4; i++) {
-		v[i] = v[i*100];
-		beta[i] = beta[i*100];
+	for(unsigned i = 0; i < v_temp.size() / 10; i++){
+		v.push_back(v_temp[i*10]);
+		beta.push_back(beta_temp[i*10]);
 	}
 	
-	v.resize(4);
-	beta.resize(4);
-	
-	
-	//Compute gravity turn
-	for(double i = 3; i < 5000; i++) {
-		double t = i * h;
-		double b = beta[i-1] + (beta[i] - beta[i-1])*2;
-		//Yay, magic coefficients
-		v.push_back((12.0/25.0) * h * g * (get_TWR(stages, t + h) - cos(b)) + (48.0/25.0) * v[i] - (36.0/25.0) * v[i-1] + (16.0/25.0) * v[i-2] - (3.0/25.0) * v[i-3]);
-		beta.push_back((12.0/25.0) * ((h * g) / v[i+1]) * sin(b) + (48.0/25.0) * beta[i] - (36.0/25.0) * beta[i-1] + (16.0/25.0) * beta[i-2] - (3.0/25.0) * beta[i-3]);
+	for(int c = 0; c < 100; c++) {
+		std::cout << v[c] << " " << beta[c] << "\n";
 	}
+	
 	
 	std::cout << "Done.\n\n";
 	
@@ -189,6 +217,7 @@ int main(int argc, char* argv[]) {
 			while(velocity() > v[i]) check_stages(cont, engines, active_eng, stage_itr);
 		std::tuple<double, double, double> direction = std::make_tuple(cos(beta[i]), tgt_pitch, sin(beta[i]));
 		ap.set_target_direction(direction);
+	//	std::cout << std::get<0>(direction) << " " << std::get<1>(direction) << " " << std::get<2>(direction) << "\n";
 		
 		if(altitude() > 100000){
 			if(!fairing_sep){
