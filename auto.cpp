@@ -5,6 +5,7 @@
 #include <thread>
 #include <tuple>
 #include <iomanip>
+#include <string>
 #include <cmath>
 #include <krpc.hpp>
 #include <krpc/services/space_center.hpp>
@@ -72,7 +73,9 @@ int main(int argc, char* argv[]) {
 	std::vector<double> v_temp = {0};		//Temporary v storage for use in second-order approximation
 	std::vector<double> beta_temp = {0};	//Ditto for beta
 	std::vector<Stage> stages;
-	std::ifstream istr(argv[1]);
+	std::string filepath = argv[1];
+	filepath += ".txt";
+	std::ifstream istr(filepath);
 	
 	istr >> beta_temp[0];
 	
@@ -120,16 +123,18 @@ int main(int argc, char* argv[]) {
 			t += .001;
 		}
 		
+		//Believe it or not, but these are not the silliest for loops I've ever written.
+		//That one that "incremented" by multiplying the index by 10 was definitely sillier
+		
 		int inc = i + 4;
 		//Move first 4 terms into place (don't need to move the first since it's already in place)
 		for(i++; i < inc; i++) {
-		v_temp.push_back(v_fo[((inc - i) % 4) * 10]);
-			beta_temp.push_back(beta_fo[((inc - i) % 4) * 10]);
+			v_temp.push_back(v_fo[(4 - ((inc - i) % 4)) * 10]); //Ain't that a fun bit of math...
+			beta_temp.push_back(beta_fo[(4 - ((inc - i) % 4)) * 10]);
 		}
 		
-		
 		//Compute gravity turn
-		for(; i < stage->burn_time / h; i++) {
+		for(i--; i < stage->burn_time / h; i++) {
 			double b = beta_temp[i-1] + (beta_temp[i] - beta_temp[i-1])*2;
 			//Yay, magic coefficients
 			v_temp.push_back((12.0/25.0) * h * g * (get_TWR(stages, t + h) - cos(b)) + 
@@ -146,15 +151,10 @@ int main(int argc, char* argv[]) {
 		}
 	}
 	
-	for(unsigned i = 0; i < v_temp.size() / 10; i++){
-		v.push_back(v_temp[i*10]);
-		beta.push_back(beta_temp[i*10]);
+	for(unsigned j = 0; j < v_temp.size() / 10; j++){
+		v.push_back(v_temp[j*10]);
+		beta.push_back(beta_temp[j*10]);
 	}
-	
-	for(int c = 0; c < 100; c++) {
-		std::cout << v[c] << " " << beta[c] << "\n";
-	}
-	
 	
 	std::cout << "Done.\n\n";
 	
@@ -210,12 +210,12 @@ int main(int argc, char* argv[]) {
 	
 	std::cout << "Executing gravity turn...\n";
 	//Actually execute gravity turn
-	for(unsigned i = 1; i < v.size(); i++) {
-		if(v[i] > v[i-1])
-			while(velocity() < v[i]) check_stages(cont, engines, active_eng, stage_itr);
+	for(unsigned j = 1; j < v.size(); j++) {
+		if(v[j] > v[j-1])
+			while(velocity() < v[j]) check_stages(cont, engines, active_eng, stage_itr);
 		else
-			while(velocity() > v[i]) check_stages(cont, engines, active_eng, stage_itr);
-		std::tuple<double, double, double> direction = std::make_tuple(cos(beta[i]), tgt_pitch, sin(beta[i]));
+			while(velocity() > v[j]) check_stages(cont, engines, active_eng, stage_itr);
+		std::tuple<double, double, double> direction = std::make_tuple(cos(beta[j]), tgt_pitch, sin(beta[j]));
 		ap.set_target_direction(direction);
 	//	std::cout << std::get<0>(direction) << " " << std::get<1>(direction) << " " << std::get<2>(direction) << "\n";
 		
