@@ -117,9 +117,9 @@ int main(int argc, char* argv[]) {
 		acc_t += stage->burn_time;
 		//Use first-order algorithm at 100x precision to get first 4 terms
 		for(int j = 0; j < 30; j++) {
-			v_fo.push_back(.001*g*(get_TWR(stages, t + .001) - cos(beta_fo[i])) + v_fo[i]);
-			double v_beta = .001*g*sin(beta_fo[i]) + beta_fo[i]*v_fo[i+1];
-			beta_fo.push_back(v_beta / v_fo[i+1]);
+			v_fo.push_back(.001*g*(get_TWR(stages, t + .001) - cos(beta_fo[j])) + v_fo[j]);
+			double v_beta = .001*g*sin(beta_fo[j]) + beta_fo[j]*v_fo[j+1];
+			beta_fo.push_back(v_beta / v_fo[j+1]);
 			t += .001;
 		}
 		
@@ -134,7 +134,7 @@ int main(int argc, char* argv[]) {
 		}
 		
 		//Compute gravity turn
-		for(i--; i < stage->burn_time / h; i++) {
+		for(i--; i < acc_t / h; i++) {
 			double b = beta_temp[i-1] + (beta_temp[i] - beta_temp[i-1])*2;
 			//Yay, magic coefficients
 			v_temp.push_back((12.0/25.0) * h * g * (get_TWR(stages, t + h) - cos(b)) + 
